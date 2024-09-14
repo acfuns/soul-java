@@ -3,8 +3,12 @@ package com.github.acfuns.soul.controller;
 import com.github.acfuns.soul.domain.postAggregate.LikeRepository;
 import com.github.acfuns.soul.domain.postAggregate.Post;
 import com.github.acfuns.soul.domain.postAggregate.PostRepository;
+import com.github.acfuns.soul.domain.service.LikeService;
+import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
@@ -19,11 +23,14 @@ import java.util.UUID;
 public class PostController {
 
     private final PostRepository postRepository;
-    // private final LikeRepository likeRepository;
+    private final LikeRepository likeRepository;
+    private final LikeService likeService;
 
-    public PostController(@Autowired PostRepository postRepository, @Autowired LikeRepository likeRepository) {
+    @Autowired
+    public PostController(PostRepository postRepository, LikeRepository likeRepository, LikeService likeService) {
         this.postRepository = postRepository;
-        // this.likeRepository = likeRepository;
+        this.likeRepository = likeRepository;
+        this.likeService = likeService;
     }
 
     /**
@@ -57,24 +64,69 @@ public class PostController {
                     post.getUserId(),
                     post.getParentPost(),
                     post.getPosts().size(),
-                    post.getLikes().size()
+                    likeService.getLikeCount(post.getId().toString())
             );
             postVDs.add(postVD);
         }
         return postVDs;
     }
 
+    @Transactional
+    @DeleteMapping
+    public ResponseEntity<String> deletePost(@AuthenticationPrincipal Jwt jwt, @RequestBody PostIDDto postIdDto) {
+        var userId = UUID.fromString(jwt.getClaimAsString("sub"));
+        var postId = postIdDto.postId;
 
-    public record PostDto(String content) {
+        var deleteCode = postRepository.deletePostByIdAndUserId(userId, UUID.fromString(postId));
+
+        if (deleteCode > 0) {
+            return ResponseEntity.ok("Deleted post successfully");
+        } else {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Deleted post failed");
+        }
     }
+
+    @PostMapping("/comment")
+    public Post comment(@AuthenticationPrincipal Jwt jwt, @RequestBody CommentDto commentDto) {
+        var userId = UUID.fromString(jwt.getClaimAsString("sub"));
+        var parentPost = postRepository.findById(UUID.fromString(commentDto.postID)).orElseThrow();
+        var comment = new Post();
+        comment.setContent(commentDto.content);
+        comment.setUserId(userId);
+        comment.setParentPost(parentPost);
+        return postRepository.save(comment);
+    }
+
+    @Transactional
+    @PostMapping("/like")
+    public ResponseEntity<String> likePost(@AuthenticationPrincipal Jwt jwt, @RequestBody PostIDDto postIdDto) {
+        var userId = jwt.getClaimAsString("sub");
+        var postId = postIdDto.postId;
+        likeService.likePost(postId, userId);
+        return ResponseEntity.ok("Post liked successfully");
+    }
+
+    @Transactional
+    @PostMapping("/unlike")
+    public ResponseEntity<String> unLikePost(@AuthenticationPrincipal Jwt jwt, @RequestBody PostIDDto postIdDto) {
+        var userId = jwt.getClaimAsString("sub");
+        var postId = postIdDto.postId;
+        likeService.unlikePost(postId, userId);
+        return ResponseEntity.ok("Post unliked successfully");
+    }
+
+    public record PostIDDto(String postId) {}
+
+    public record PostDto(String content) {}
 
     public record PostVD(
             UUID postId,
             String content,
             UUID userId,
             Post parentPost,
-            int comment_at,
-            int like_at
-    ) {
-    }
+            long comment_at,
+            long like_at
+    ) {}
+
+    public record CommentDto(String postID, String content) {}
 }

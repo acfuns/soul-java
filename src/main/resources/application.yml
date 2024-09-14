@@ -19,6 +19,10 @@ spring:
       resourceserver:
         jwt:
           issuer-uri: http://localhost:8080/realms/myRealm
+  data:
+    redis:
+      port: 6379
+      host: localhost
 
 server:
   port: 8081
